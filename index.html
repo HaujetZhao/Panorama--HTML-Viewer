@@ -325,11 +325,16 @@
             const geometry = new THREE.SphereGeometry(500, 60, 40);
             geometry.scale(-1, 1, 1); // 翻转球体使其内部可见
             
+            // 创建材质 - 使用黑色Canvas纹理
+            const canvas = document.createElement('canvas');
+            canvas.width = 1;
+            canvas.height = 1;
+            const context = canvas.getContext('2d');
+            context.fillStyle = '#000000';
+            context.fillRect(0, 0, 1, 1);
+
             // 创建纹理占位
-            const textureLoader = new THREE.TextureLoader();
-            const placeholderTexture = textureLoader.load('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAA1JREFUGFdjYGBg+A8AAQQBAHAgCQsAAAAASUVORK5CYII=');
-            
-            // 创建材质
+            const placeholderTexture = new THREE.CanvasTexture(canvas);
             const material = new THREE.MeshBasicMaterial({
                 map: placeholderTexture
             });
