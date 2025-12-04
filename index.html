@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全景视频/照片播放器</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body.drag-over {
+            background: linear-gradient(135deg, #1a1a2e 0%, #2a3a5e 100%);
+        }
+
+        /* 播放器容器占满全屏 */
+        .player-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+            background-color: #000;
+        }
+
+        #video-container {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 悬浮控制条样式 */
+        .floating-controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 800px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            border-radius: 25px;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 15px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.5);
+            z-index: 100;
+            opacity: 0.5;
+            transition: opacity 0.3s ease;
+        }
+
+        .floating-controls:hover {
+            opacity: 1;
+        }
+
+        /* 控制按钮样式 */
+        .control-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 1rem;
+        }
+
+        .control-btn:hover:not(:disabled) {
+            background: rgba(67, 97, 238, 0.8);
+            transform: scale(1.1);
+        }
+
+        .control-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .control-btn.active {
+            background: rgba(0, 150, 0, 0.7);
+        }
+
+        /* 控制条左右部分布局 */
+        .controls-left, .controls-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        /* 进度条样式 */
+        .progress-container {
+            flex-grow: 1;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #4361ee, #4cc9f0);
+            border-radius: 3px;
+            width: 0%;
+            transition: width 0.1s;
+        }
+
+        /* 时间显示样式 */
+        .time-display {
+            color: #a5b4fc;
+            font-size: 0.9rem;
+            min-width: 100px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        /* 加载动画样式 */
+        .loader {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60px;
+            height: 60px;
+            border: 5px solid rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            border-top-color: #4361ee;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+
+        /* 拖放覆盖层样式 */
+        .drag-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(67, 97, 238, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            gap: 20px;
+            color: white;
+            font-size: 1.5rem;
+            backdrop-filter: blur(5px);
+        }
+
+        .drag-overlay.active {
+            display: flex;
+        }
+
+        .drag-overlay i {
+            font-size: 4rem;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        /* 移动端适配 */
+        @media (max-width: 768px) {
+            .floating-controls {
+                width: 95%;
+                padding: 8px 15px;
+                bottom: 60px;
+            }
+            
+            .control-btn {
+                width: 35px;
+                height: 35px;
+                font-size: 0.9rem;
+            }
+            
+            .time-display {
+                min-width: 80px;
+                font-size: 0.8rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .floating-controls {
+                padding: 6px 12px;
+                bottom: 60px;
+                gap: 10px;
+            }
+            
+            .control-btn {
+                width: 32px;
+                height: 32px;
+                font-size: 0.8rem;
+            }
+            
+            .time-display {
+                min-width: 70px;
+                font-size: 0.75rem;
+            }
+            
+            .controls-left, .controls-right {
+                gap: 6px;
+            }
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <!-- 隐藏的文件输入 -->
+    <input type="file" id="file-input" class="hidden" accept="video/*,image/*">
+    
+    <!-- 播放器容器，占满整个页面 -->
+    <div class="player-container" id="player-container">
+        <div id="video-container"></div>
+        <div class="loader" id="loader"></div>
+        
+        <!-- 悬浮控制条 -->
+        <div class="floating-controls" id="floating-controls">
+            <div class="controls-left">
+                <button id="open-btn" class="control-btn" title="打开文件">
+                    <i class="fas fa-folder-open"></i>
+                </button>
+                <button id="play-pause-btn" class="control-btn" title="播放/暂停" disabled>
+                    <i class="fas fa-play"></i>
+                </button>
+                <button id="volume-btn" class="control-btn" title="静音/取消静音" disabled>
+                    <i class="fas fa-volume-up"></i>
+                </button>
+            </div>
+            
+            <div class="progress-container" id="progress-container">
+                <div class="progress-bar" id="progress-bar"></div>
+            </div>
+            
+            <div class="time-display" id="time-display">00:00 / 00:00</div>
+            
+            <div class="controls-right">
+                <button id="gyro-btn" class="control-btn" title="陀螺仪控制">
+                    <i class="fas fa-compass"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 拖放文件覆盖层 -->
+    <div class="drag-overlay" id="drag-overlay">
+        <i class="fas fa-cloud-upload-alt"></i>
+        <p>拖放文件到此处</p>
+        <p class="file-types">支持格式: MP4, WebM, OGG, MOV, JPG, PNG, WebP</p>
+    </div>
+
+    <script>
+        // 全局变量
+        let scene, camera, renderer, video, videoTexture, sphere;
+        let isPlaying = false;
+        let isMuted = false;
+        let currentMediaSrc = null;
+        let currentMediaType = null; // 'video' 或 'image'
+        let imageTexture = null;
+        let keysPressed = {};
+        const KEY_SPEED = 1.5; // 键盘控制转动速度
+        
+        // 控制相关变量（类似于图片查看器）
+        let isUserInteracting = false;
+        let onPointerDownPointerX = 0, onPointerDownPointerY = 0;
+        let onPointerDownLon = 0, onPointerDownLat = 0;
+        let lon = 0, lat = 0;
+        let phi = 0, theta = 0;
+        
+        // 触摸缩放相关
+        let initialPinchDistance = 0;
+        let initialFov = 75;
+        
+        // 跟踪鼠标是否在播放器区域内
+        let isMouseOverPlayer = false;
+        
+        // 陀螺仪相关变量
+        let isGyroEnabled = false;
+        let deviceOrientationObj = {};
+        let screenOrientation = 0;
+        
+        // 初始化Three.js场景
+        function initThreeJS() {
+            // 创建场景
+            scene = new THREE.Scene();
+            
+            // 创建相机（透视相机，75度视野）
+            camera = new THREE.PerspectiveCamera(75, 
+                window.innerWidth / window.innerHeight, 
+                0.1, 1100);
+            
+            // 创建渲染器
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x000000, 1);
+            
+            // 将渲染器添加到DOM
+            const container = document.getElementById('video-container');
+            container.appendChild(renderer.domElement);
+            
+            // 添加光源
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            
+            // 创建球体几何体（内部可见）
+            const geometry = new THREE.SphereGeometry(500, 60, 40);
+            geometry.scale(-1, 1, 1); // 翻转球体使其内部可见
+            
+            // 创建纹理占位
+            const textureLoader = new THREE.TextureLoader();
+            const placeholderTexture = textureLoader.load('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAA1JREFUGFdjYGBg+A8AAQQBAHAgCQsAAAAASUVORK5CYII=');
+            
+            // 创建材质
+            const material = new THREE.MeshBasicMaterial({
+                map: placeholderTexture
+            });
+            
+            // 创建球体网格
+            sphere = new THREE.Mesh(geometry, material);
+            scene.add(sphere);
+            
+            // 设置相机位置（球体中心）
+            camera.position.set(0, 0, 0.1);
+            
+            // 初始化控制变量
+            lon = 0;
+            lat = 0;
+            
+            // 添加鼠标/触摸事件监听（类似于图片查看器）
+            setupControls();
+            
+            // 动画循环
+            function animate() {
+                requestAnimationFrame(animate);
+                
+                // 更新相机朝向
+                updateCamera();
+                
+                // 如果视频正在播放，更新纹理
+                if (currentMediaType === 'video' && video && videoTexture && isPlaying) {
+                    videoTexture.needsUpdate = true;
+                }
+                // 在 animate() 函数中找到 renderer.render(scene, camera); 这行
+                // 在其前面添加：
+                if (!isGyroEnabled && !isUserInteracting) {
+                    updateKeyboardControls();
+                }
+                renderer.render(scene, camera);
+            }
+            animate();
+            
+            // 窗口大小调整处理
+            window.addEventListener('resize', function() {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+        
+        // 设置控制事件监听（类似于图片查看器）
+        function setupControls() {
+            const container = document.getElementById('video-container');
+            
+            // 鼠标/单指操作
+            container.style.touchAction = 'none';
+            
+            // 监听鼠标进入/离开播放器区域
+            container.addEventListener('mouseenter', () => {
+                isMouseOverPlayer = true;
+            });
+            
+            container.addEventListener('mouseleave', () => {
+                isMouseOverPlayer = false;
+            });
+            
+            container.addEventListener('pointerdown', onPointerDown);
+            document.addEventListener('pointermove', onPointerMove);
+            document.addEventListener('pointerup', onPointerUp);
+            
+            // 只在播放器区域内响应滚轮事件
+            container.addEventListener('wheel', onDocumentMouseWheel, { passive: false });
+            
+            // 双指缩放监听
+            container.addEventListener('touchstart', onTouchStart, { passive: false });
+            container.addEventListener('touchmove', onTouchMove, { passive: false });
+        }
+        
+        // 鼠标/触摸按下事件
+        function onPointerDown(event) {
+            keysPressed = {};
+            if (event.isPrimary === false || event.button !== 0) return;
+            isUserInteracting = true;
+            onPointerDownPointerX = event.clientX;
+            onPointerDownPointerY = event.clientY;
+            onPointerDownLon = lon;
+            onPointerDownLat = lat;
+        }
+        
+        // 鼠标/触摸移动事件
+        function onPointerMove(event) {
+            if (event.isPrimary === false || !isUserInteracting || isGyroEnabled) return;
+            
+            const dx = event.clientX - onPointerDownPointerX;
+            const dy = event.clientY - onPointerDownPointerY;
+            
+            // 检测是否为触摸事件，为触摸事件使用更大的系数
+            const isTouchEvent = event.pointerType === 'touch' || event.touches;
+            const sensitivity = isTouchEvent ? 0.25 : 0.1; // 触摸设备使用0.25，鼠标使用0.1
+            const fovSensetivity = camera.fov / 60; // 根据当前FOV调整灵敏度
+            
+            lon = (onPointerDownLon - dx * sensitivity * fovSensetivity);
+            lat = (onPointerDownLat + dy * sensitivity * fovSensetivity);
+        }
+        
+        // 鼠标/触摸抬起事件
+        function onPointerUp() {
+            isUserInteracting = false;
+        }
+        
+        // 鼠标滚轮缩放 - 只在播放器区域内生效
+        function onDocumentMouseWheel(event) {
+            // 防止事件冒泡到页面
+            event.preventDefault();
+            event.stopPropagation();
+            
+            // 只在鼠标在播放器区域内时处理缩放
+            if (!isMouseOverPlayer) return;
+            
+            const fov = camera.fov + event.deltaY * 0.05;
+            camera.fov = THREE.MathUtils.clamp(fov, 10, 110);
+            camera.updateProjectionMatrix();
+        }
+        
+        // 双指触摸开始
+        function onTouchStart(event) {
+            if (event.touches.length === 2) {
+                // 两个手指，开始缩放
+                isUserInteracting = false; // 暂停拖拽旋转
+                const dx = event.touches[0].pageX - event.touches[1].pageX;
+                const dy = event.touches[0].pageY - event.touches[1].pageY;
+                initialPinchDistance = Math.sqrt(dx * dx + dy * dy);
+                initialFov = camera.fov;
+            }
+        }
+        
+        // 双指触摸移动
+        function onTouchMove(event) {
+            if (event.touches.length === 2) {
+                event.preventDefault(); // 防止整个页面缩放
+                const dx = event.touches[0].pageX - event.touches[1].pageX;
+                const dy = event.touches[0].pageY - event.touches[1].pageY;
+                const currentDistance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (initialPinchDistance > 0) {
+                    const scale = initialPinchDistance / currentDistance;
+                    let newFov = initialFov * scale;
+                    newFov = Math.max(10, Math.min(110, newFov)); // 限制范围
+                    camera.fov = newFov;
+                    camera.updateProjectionMatrix();
+                }
+            }
+        }
+        
+        // 更新相机朝向（类似于图片查看器）
+        function updateCamera() {
+            // 如果陀螺仪启用，使用陀螺仪控制
+            if (isGyroEnabled) {
+                updateGyroCamera();
+                return;
+            }
+            
+            // 限制纬度范围
+            lat = Math.max(-85, Math.min(85, lat));
+            
+            // 将经度和纬度转换为球面坐标
+            phi = THREE.MathUtils.degToRad(90 - lat);
+            theta = THREE.MathUtils.degToRad(lon);
+            
+            // 计算相机看向的点
+            const x = 500 * Math.sin(phi) * Math.cos(theta);
+            const y = 500 * Math.cos(phi);
+            const z = 500 * Math.sin(phi) * Math.sin(theta);
+            
+            // 让相机看向该点
+            camera.lookAt(x, y, z);
+        }
+        
+        // 更新陀螺仪相机控制
+        function updateGyroCamera() {
+            if (!deviceOrientationObj.alpha) return;
+            
+            const alpha = deviceOrientationObj.alpha ? THREE.MathUtils.degToRad(deviceOrientationObj.alpha) : 0; // Z
+            const beta = deviceOrientationObj.beta ? THREE.MathUtils.degToRad(deviceOrientationObj.beta) : 0;   // X'
+            const gamma = deviceOrientationObj.gamma ? THREE.MathUtils.degToRad(deviceOrientationObj.gamma) : 0; // Y''
+            const orient = screenOrientation ? THREE.MathUtils.degToRad(screenOrientation) : 0;
+            
+            // 欧拉角转换逻辑 (参考 Three.js DeviceOrientationControls)
+            const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // - PI/2 around the x-axis
+            const zee = new THREE.Vector3(0, 0, 1);
+            const euler = new THREE.Euler();
+            const q0 = new THREE.Quaternion();
+            
+            euler.set(beta, alpha, -gamma, 'YXZ'); // 'ZXY' for the device, but 'YXZ' for us
+            q0.setFromEuler(euler);
+            q0.multiply(q1); // camera looks out the back of the device, not the top
+            q0.multiply(new THREE.Quaternion().setFromAxisAngle(zee, -orient)); // adjust for screen orientation
+            
+            // 应用旋转
+            camera.quaternion.copy(q0);
+        }
+        
+        // 陀螺仪设备方向事件处理
+        function onDeviceOrientation(event) {
+            deviceOrientationObj = event;
+        }
+        
+        // 切换陀螺仪状态
+        function toggleGyro() {
+            const gyroBtn = document.getElementById('gyro-btn');
+            
+            if (!isGyroEnabled) {
+                // 请求陀螺仪权限 (iOS 13+ 需要)
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    DeviceOrientationEvent.requestPermission()
+                        .then(response => {
+                            if (response === 'granted') {
+                                enableGyro();
+                            } else {
+                                alert('需要陀螺仪权限才能使用此功能。');
+                            }
+                        })
+                        .catch(error => {
+                            console.error('请求陀螺仪权限失败:', error);
+                            alert('无法访问陀螺仪，请确保您的设备支持并允许访问。');
+                        });
+                } else {
+                    // Android 或旧版 iOS
+                    enableGyro();
+                }
+            } else {
+                disableGyro();
+            }
+            
+            function enableGyro() {
+                isGyroEnabled = true;
+                gyroBtn.classList.add('active');
+                gyroBtn.title = '陀螺仪: 开 (点击关闭)';
+                window.addEventListener('deviceorientation', onDeviceOrientation);
+                screenOrientation = window.orientation || 0;
+            }
+            
+            function disableGyro() {
+                isGyroEnabled = false;
+                gyroBtn.classList.remove('active');
+                gyroBtn.title = '陀螺仪控制';
+                window.removeEventListener('deviceorientation', onDeviceOrientation);
+                
+                // 将当前相机方向转换为经纬度，保持当前视角
+                const direction = new THREE.Vector3(0, 0, -1);
+                direction.applyQuaternion(camera.quaternion);
+                
+                // 计算经纬度
+                const radius = Math.sqrt(
+                    direction.x * direction.x +
+                    direction.y * direction.y +
+                    direction.z * direction.z
+                );
+                
+                // 经度 (lon)
+                lon = Math.atan2(direction.z, direction.x) * (180 / Math.PI);
+                
+                // 纬度 (lat)
+                const phi = Math.acos(direction.y / radius);
+                lat = 90 - (phi * (180 / Math.PI));
+                
+                // 限制纬度范围
+                lat = Math.max(-85, Math.min(85, lat));
+
+                // 重置键盘控制状态
+                keysPressed = {};
+            }
+        }
+        
+        // 初始化视频播放器
+        function initVideoPlayer() {
+            // 创建视频元素
+            video = document.createElement('video');
+            video.loop = true;
+            video.muted = false; // 初始不静音
+            video.playsInline = true;
+            
+            // 创建视频纹理
+            videoTexture = new THREE.VideoTexture(video);
+            videoTexture.minFilter = THREE.LinearFilter;
+            videoTexture.magFilter = THREE.LinearFilter;
+            videoTexture.format = THREE.RGBFormat;
+            
+            // 视频事件监听
+            video.addEventListener('loadedmetadata', function() {
+                updateVideoControls();
+                updateTimeDisplay();
+                document.getElementById('loader').style.display = 'none';
+                
+                // 启用视频控制条
+                enableVideoControls(true);
+            });
+            
+            video.addEventListener('timeupdate', updateProgress);
+            video.addEventListener('ended', function() {
+                isPlaying = false;
+                updatePlayButton();
+            });
+            
+            // 视频加载开始
+            video.addEventListener('loadstart', function() {
+                document.getElementById('loader').style.display = 'block';
+            });
+        }
+        
+        // 启用/禁用视频控制条
+        function enableVideoControls(enabled) {
+            const playPauseBtn = document.getElementById('play-pause-btn');
+            const volumeBtn = document.getElementById('volume-btn');
+            const progressContainer = document.getElementById('progress-container');
+            const timeDisplay = document.getElementById('time-display');
+            
+            playPauseBtn.disabled = !enabled;
+            volumeBtn.disabled = !enabled;
+            progressContainer.disabled = !enabled;
+            timeDisplay.disabled = !enabled;
+            
+            // 更新控制条样式
+            if (!enabled) {
+                playPauseBtn.style.opacity = '0.5';
+                volumeBtn.style.opacity = '0.5';
+                progressContainer.style.opacity = '0.5';
+                timeDisplay.style.opacity = '0.5';
+            } else {
+                playPauseBtn.style.opacity = '1';
+                volumeBtn.style.opacity = '1';
+                progressContainer.style.opacity = '1';
+                timeDisplay.style.opacity = '1';
+            }
+        }
+        
+        // 更新视频控制界面
+        function updateVideoControls() {
+            const playPauseBtn = document.getElementById('play-pause-btn');
+            const volumeBtn = document.getElementById('volume-btn');
+            
+            // 播放/暂停按钮
+            playPauseBtn.innerHTML = isPlaying ? 
+                '<i class="fas fa-pause"></i>' : 
+                '<i class="fas fa-play"></i>';
+            
+            // 音量按钮
+            volumeBtn.innerHTML = isMuted ? 
+                '<i class="fas fa-volume-mute"></i>' : 
+                '<i class="fas fa-volume-up"></i>';
+        }
+        
+        // 更新进度条
+        function updateProgress() {
+            if (!video || !video.duration) return;
+            
+            const progress = (video.currentTime / video.duration) * 100;
+            document.getElementById('progress-bar').style.width = `${progress}%`;
+            updateTimeDisplay();
+        }
+        
+        // 更新时间显示
+        function updateTimeDisplay() {
+            if (!video || !video.duration) return;
+            
+            const currentTime = formatTime(video.currentTime);
+            const duration = formatTime(video.duration);
+            document.getElementById('time-display').textContent = `${currentTime} / ${duration}`;
+        }
+        
+        // 格式化时间 (秒 -> MM:SS)
+        function formatTime(seconds) {
+            const min = Math.floor(seconds / 60);
+            const sec = Math.floor(seconds % 60);
+            return `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+        }
+        
+        // 加载媒体文件
+        function loadMediaFile(file) {
+            if (!file) return;
+
+            // 停止当前媒体
+            if (currentMediaType === 'video' && video) {
+                video.pause();
+                isPlaying = false;
+                updatePlayButton();
+            }
+            
+            // 创建文件URL
+            const mediaURL = URL.createObjectURL(file);
+            currentMediaSrc = mediaURL;
+            
+            // 根据文件类型加载
+            if (file.type.startsWith('video/')) {
+                currentMediaType = 'video';
+                loadVideo(mediaURL);
+            } else if (file.type.startsWith('image/')) {
+                currentMediaType = 'image';
+                loadImage(mediaURL);
+            } else {
+                alert('不支持的文件类型，请选择视频或图片文件');
+                return;
+            }
+        }
+        
+        // 加载视频
+        function loadVideo(src) {
+            // 启用视频控制条
+            enableVideoControls(true);
+            
+            // 停止当前媒体
+            if (currentMediaType === 'video' && video) {
+                video.pause();
+                isPlaying = false;
+                updatePlayButton();
+            }
+            
+            // 如果没有初始化视频播放器，先初始化
+            if (!video) {
+                initVideoPlayer();
+            }
+            
+            // 设置视频源
+            video.src = src;
+            video.load();
+            
+            // 更新球体材质为视频纹理
+            sphere.material.map = videoTexture;
+            sphere.material.needsUpdate = true;
+            
+            // 尝试播放（需要用户交互）
+            const playPromise = video.play();
+            
+            if (playPromise !== undefined) {
+                playPromise.then(() => {
+                    isPlaying = true;
+                    updatePlayButton();
+                }).catch(error => {
+                    console.log("自动播放被阻止，需要用户交互");
+                    isPlaying = false;
+                    updatePlayButton();
+                });
+            }
+        }
+        
+        // 加载图片
+        function loadImage(src) {
+            // 禁用视频控制条（变成灰色不可用状态）
+            enableVideoControls(false);
+            
+            // 停止当前视频（如果有）
+            if (currentMediaType === 'video' && video) {
+                video.pause();
+                isPlaying = false;
+            }
+            
+            currentMediaType = 'image';
+            
+            // 显示加载动画
+            document.getElementById('loader').style.display = 'block';
+            
+            // 释放之前的图片纹理
+            if (imageTexture) {
+                imageTexture.dispose();
+            }
+            
+            // 使用TextureLoader加载图片
+            const textureLoader = new THREE.TextureLoader();
+            textureLoader.load(
+                src,
+                // 加载完成回调
+                function(texture) {
+                    imageTexture = texture;
+                    imageTexture.minFilter = THREE.LinearFilter;
+                    imageTexture.magFilter = THREE.LinearFilter;
+                    
+                    // 更新球体材质为图片纹理
+                    sphere.material.map = imageTexture;
+                    sphere.material.needsUpdate = true;
+                    
+                    // 隐藏加载动画
+                    document.getElementById('loader').style.display = 'none';
+                    
+                    // 重置进度条和时间显示
+                    document.getElementById('progress-bar').style.width = '0%';
+                    document.getElementById('time-display').textContent = '00:00 / 00:00';
+                },
+                // 加载进度回调
+                function(xhr) {
+                    console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+                },
+                // 加载错误回调
+                function(error) {
+                    console.error('图片加载失败:', error);
+                    document.getElementById('loader').style.display = 'none';
+                }
+            );
+        }
+        
+        // 格式化文件大小
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        // 更新播放按钮状态
+        function updatePlayButton() {
+            const playPauseBtn = document.getElementById('play-pause-btn');
+            playPauseBtn.innerHTML = isPlaying ? 
+                '<i class="fas fa-pause"></i>' : 
+                '<i class="fas fa-play"></i>';
+        }
+
+
+        // 键盘控制
+        function updateKeyboardControls() {
+            // 检查是否有键盘按键被按下
+            const hasKeys = Object.keys(keysPressed).length > 0;
+            if (!hasKeys) return;
+            
+            // 方向键/WASD控制
+            if (keysPressed['ArrowUp'] || keysPressed['KeyW']) {
+                lat += KEY_SPEED * camera.fov / 60;
+            }
+            if (keysPressed['ArrowDown'] || keysPressed['KeyS']) {
+                lat -= KEY_SPEED * camera.fov / 60;
+            }
+            if (keysPressed['ArrowLeft'] || keysPressed['KeyA']) {
+                lon -= KEY_SPEED * camera.fov / 60;
+            }
+            if (keysPressed['ArrowRight'] || keysPressed['KeyD']) {
+                lon += KEY_SPEED * camera.fov / 60;
+            }
+            
+            // 限制纬度范围
+            lat = Math.max(-85, Math.min(85, lat));
+        }
+
+
+        // DOM加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 初始化Three.js场景
+            initThreeJS();
+            
+            // 打开文件按钮
+            document.getElementById('open-btn').addEventListener('click', function() {
+                document.getElementById('file-input').click();
+                this.blur(); // 移除焦点
+            });
+            
+            // 文件输入变化
+            document.getElementById('file-input').addEventListener('change', function(e) {
+                if (e.target.files.length > 0) {
+                    loadMediaFile(e.target.files[0]);
+                }
+            });
+            
+            // 播放/暂停按钮
+            document.getElementById('play-pause-btn').addEventListener('click', function() {
+                if (!video || !video.src || this.disabled) return;
+                
+                if (isPlaying) {
+                    video.pause();
+                } else {
+                    video.play();
+                }
+                
+                isPlaying = !isPlaying;
+                updatePlayButton();
+                this.blur(); // 移除焦点
+            });
+            
+            // 音量按钮
+            document.getElementById('volume-btn').addEventListener('click', function() {
+                if (!video || this.disabled) return;
+                
+                isMuted = !isMuted;
+                video.muted = isMuted;
+                updateVideoControls();
+                this.blur(); // 移除焦点
+            });
+            
+            // 进度条点击
+            document.getElementById('progress-container').addEventListener('click', function(e) {
+                if (!video || !video.duration || this.disabled) return;
+                
+                const rect = this.getBoundingClientRect();
+                const pos = (e.clientX - rect.left) / rect.width;
+                video.currentTime = pos * video.duration;
+            });
+            
+            // 陀螺仪按钮
+            document.getElementById('gyro-btn').addEventListener('click', function() {
+                toggleGyro();
+                this.blur(); // 移除焦点
+            });
+            
+            // 整个页面支持拖放功能
+            const dragOverlay = document.getElementById('drag-overlay');
+            
+            // 防止默认拖放行为
+            document.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+            
+            document.addEventListener('dragenter', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                dragOverlay.classList.add('active');
+                document.body.classList.add('drag-over');
+            });
+            
+            document.addEventListener('dragleave', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // 只有当鼠标离开文档时才移除拖放效果
+                if (e.clientX <= 0 || e.clientY <= 0 || 
+                    e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
+                    dragOverlay.classList.remove('active');
+                    document.body.classList.remove('drag-over');
+                }
+            });
+            
+            document.addEventListener('drop', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                dragOverlay.classList.remove('active');
+                document.body.classList.remove('drag-over');
+                
+                if (e.dataTransfer.files.length > 0) {
+                    loadMediaFile(e.dataTransfer.files[0]);
+                }
+
+            });
+
+            // 键盘事件监听
+            // 键盘事件监听
+            document.addEventListener('keydown', function(e) {
+                
+                // Ctrl+O 打开文件
+                if ((e.ctrlKey || e.metaKey) && e.code === 'KeyO') {
+                    e.preventDefault(); // 阻止浏览器默认的打开文件对话框
+                    const openBtn = document.getElementById('open-btn');
+                    if (openBtn) {
+                        openBtn.click();
+                    }
+                    return; // 直接返回，不继续处理其他按键逻辑
+                }
+
+                // 只处理特定按键
+                const validKeys = [
+                    'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+                    'KeyW', 'KeyA', 'KeyS', 'KeyD'
+                ];
+                
+                // 原有的空格键和其他按键处理...
+                if (!validKeys.includes(e.code)) return;
+                
+                // 阻止默认行为（防止空格键滚动页面）
+                e.preventDefault();
+                
+                // 记录按键状态
+                keysPressed[e.code] = true;
+                
+                // 空格键控制播放/暂停
+                if (e.code === 'Space') {
+                    // 防止在输入框中触发
+                    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                    
+                    // 触发播放/暂停按钮点击
+                    const playPauseBtn = document.getElementById('play-pause-btn');
+                    if (playPauseBtn && !playPauseBtn.disabled) {
+                        playPauseBtn.click();
+                    }
+                }
+            });
+
+            // 按键释放事件
+            document.addEventListener('keyup', function(e) {
+                const validKeys = [
+                    'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+                    'KeyW', 'KeyA', 'KeyS', 'KeyD'
+                ];
+                
+                if (validKeys.includes(e.code)) {
+                    delete keysPressed[e.code];
+                }
+            });
+
+            // 窗口失去焦点时清除所有按键状态
+            window.addEventListener('blur', function() {
+                keysPressed = {};
+            });
+            
+            // 初始状态：控制条不可用
+            enableVideoControls(false);
+        });
+    </script>
+</body>
+</html>
